@@ -51,7 +51,7 @@ namespace OnSteroidsApi.WebApi.Configuration
 
 
         /// <summary>
-        /// Registers the CORS policy using the CorsEnum name to match acegeld conventions.
+        /// Registers the CORS policy
         /// Allows any origin / method / header (appropriate for a local dev proxy tool).
         /// </summary>
         public static void AddProjectCors(this WebApplicationBuilder builder)
