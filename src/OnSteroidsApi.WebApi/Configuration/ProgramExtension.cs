@@ -74,6 +74,8 @@ namespace OnSteroidsApi.WebApi.Configuration
         /// </summary>
         public static void AddProjectServices(this IServiceCollection services)
         {
+            services.AddHttpContextAccessor();
+
             // Application services
             services.AddScoped<IProxyService, ProxyService>();
 
@@ -105,7 +107,7 @@ namespace OnSteroidsApi.WebApi.Configuration
                 configuration
                     .ReadFrom.Configuration(context.Configuration)
                     .Enrich.FromLogContext()
-                    .WriteTo.Console();
+                    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}");
             });
         }
     }

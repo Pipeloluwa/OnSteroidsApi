@@ -3,27 +3,60 @@ using System.Text;
 using OnSteroidsApi.Application.Abstractions.Interfaces.IRepositories;
 using OnSteroidsApi.Domain.Models.ProxyModels.Requests;
 using OnSteroidsApi.Domain.Models.ProxyModels.Responses;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace OnSteroidsApi.Infrastructure.Repositories;
 
 public class ProxyRepository(
         HttpClient httpClient,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<ProxyRepository> logger
     ) : IProxyRepository
 {
     private readonly HttpClient _httpClient = httpClient;
+    private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
     private readonly ILogger<ProxyRepository> _logger = logger;
 
 
     public async Task<ProxyResponse> ForwardRequestAsync(ProxyRequest proxyRequest, CancellationToken cancellationToken = default)
     {
-        var requestMessage = new HttpRequestMessage(new HttpMethod(proxyRequest.Method), proxyRequest.Url);
+        var requestId = _httpContextAccessor.HttpContext?.TraceIdentifier
+            ?? proxyRequest.Headers.FirstOrDefault(h => h.Key.Equals("X-Request-ID", StringComparison.OrdinalIgnoreCase)).Value
+            ?? "N/A";
 
-        if (!string.IsNullOrEmpty(proxyRequest.Body) && (proxyRequest.Method == "POST" || proxyRequest.Method == "PUT" || proxyRequest.Method == "PATCH"))
+        var method = proxyRequest.Method?.Trim().ToUpperInvariant() ?? "GET";
+        var requestMessage = new HttpRequestMessage(new HttpMethod(method), proxyRequest.Url);
+
+        var requiresOrAllowsBody = method is "POST" or "PUT" or "PATCH" or "DELETE";
+
+        if (!string.IsNullOrEmpty(proxyRequest.Body))
         {
-            var contentType = proxyRequest.Headers.TryGetValue("Content-Type", out var ct) ? ct : "application/json";
-            requestMessage.Content = new StringContent(proxyRequest.Body, Encoding.UTF8, contentType);
+            var contentType = proxyRequest.Headers.TryGetValue("Content-Type", out var ct) && !string.IsNullOrWhiteSpace(ct)
+                ? ct
+                : "application/json";
+
+            var stringContent = new StringContent(proxyRequest.Body, Encoding.UTF8);
+            try
+            {
+                stringContent.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);
+            }
+            catch
+            {
+                stringContent.Headers.TryAddWithoutValidation("Content-Type", contentType);
+            }
+            requestMessage.Content = stringContent;
+        }
+        else if (requiresOrAllowsBody)
+        {
+            // Send an empty content payload with Content-Length: 0 for POST, PUT, PATCH, DELETE to eliminate the HTTP 411 Length Required error on servers requiring chunked or content length.
+            var emptyContent = new ByteArrayContent(Array.Empty<byte>());
+            emptyContent.Headers.ContentLength = 0;
+            if (proxyRequest.Headers.TryGetValue("Content-Type", out var ct) && !string.IsNullOrWhiteSpace(ct))
+            {
+                emptyContent.Headers.TryAddWithoutValidation("Content-Type", ct);
+            }
+            requestMessage.Content = emptyContent;
         }
 
         foreach (var header in proxyRequest.Headers)
@@ -32,10 +65,18 @@ public class ProxyRepository(
             if (header.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)) continue;
             if (header.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
 
-            requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            if (!requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value))
+            {
+                requestMessage.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
         }
 
-        _logger.LogInformation("Sending {Method} request to {Url}", proxyRequest.Method, proxyRequest.Url);
+        if (!requestMessage.Headers.Contains("X-Request-ID") && requestId != "N/A")
+        {
+            requestMessage.Headers.TryAddWithoutValidation("X-Request-ID", requestId);
+        }
+
+        _logger.LogInformation("[{RequestId}] Sending {Method} request to {Url}", requestId, proxyRequest.Method, proxyRequest.Url);
 
         // Measure ONLY the target API response time — start stopwatch just before SendAsync
         var stopwatch = Stopwatch.StartNew();
@@ -45,8 +86,8 @@ public class ProxyRepository(
         var responseTimeMs = stopwatch.ElapsedMilliseconds;
 
         _logger.LogInformation(
-            "Target API responded in {ResponseTimeMs}ms with status {StatusCode}",
-            responseTimeMs, (int)response.StatusCode
+            "[{RequestId}] Target API responded in {ResponseTimeMs}ms with status {StatusCode}",
+            requestId, responseTimeMs, (int)response.StatusCode
         );
 
         var proxyResponse = new ProxyResponse
