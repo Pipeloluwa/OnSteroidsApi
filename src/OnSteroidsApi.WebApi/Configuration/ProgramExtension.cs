@@ -61,9 +61,11 @@ namespace OnSteroidsApi.WebApi.Configuration
                 options.AddPolicy(
                     nameof(CorsEnum._allowFrontend),
                     policy => policy
-                        .AllowAnyOrigin()
+                        .SetIsOriginAllowed(_ => true)
                         .AllowAnyMethod()
                         .AllowAnyHeader()
+                        .AllowCredentials()
+                        .WithExposedHeaders("*")
                 );
             });
         }
