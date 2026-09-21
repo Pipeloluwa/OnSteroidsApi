@@ -26,10 +26,7 @@ public class ProxyRepository(
             ?? "N/A";
 
         var method = proxyRequest.Method?.Trim().ToUpperInvariant() ?? "GET";
-        var requestMessage = new HttpRequestMessage(new HttpMethod(method), proxyRequest.Url)
-        {
-            Version = new Version(1, 1)
-        };
+        var requestMessage = new HttpRequestMessage(new HttpMethod(method), proxyRequest.Url);
 
         var requiresOrAllowsBody = method is "POST" or "PUT" or "PATCH" or "DELETE";
 
@@ -72,29 +69,6 @@ public class ProxyRepository(
             {
                 requestMessage.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
-        }
-
-        if (!requestMessage.Headers.Contains("User-Agent"))
-        {
-            requestMessage.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
-        }
-        if (!requestMessage.Headers.Contains("Accept"))
-        {
-            requestMessage.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
-        }
-        if (!requestMessage.Headers.Contains("Accept-Language"))
-        {
-            requestMessage.Headers.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
-        }
-
-        if (!requestMessage.Headers.Contains("sec-ch-ua"))
-        {
-            requestMessage.Headers.TryAddWithoutValidation("sec-ch-ua", "\"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"");
-            requestMessage.Headers.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
-            requestMessage.Headers.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
-            requestMessage.Headers.TryAddWithoutValidation("sec-fetch-dest", "empty");
-            requestMessage.Headers.TryAddWithoutValidation("sec-fetch-mode", "cors");
-            requestMessage.Headers.TryAddWithoutValidation("sec-fetch-site", "cross-site");
         }
 
         if (!requestMessage.Headers.Contains("X-Request-ID") && requestId != "N/A")
