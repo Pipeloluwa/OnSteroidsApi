@@ -102,7 +102,8 @@ namespace OnSteroidsApi.WebApi.Configuration
             services.AddHttpClient<IProxyRepository, ProxyRepository>()
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
-                    ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+                    ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true,
+                    AutomaticDecompression = System.Net.DecompressionMethods.All
                 });
         }
 
