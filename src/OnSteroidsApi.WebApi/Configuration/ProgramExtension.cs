@@ -6,6 +6,8 @@ using OnSteroidsApi.Domain.Constants.Enums;
 using OnSteroidsApi.Infrastructure.Repositories;
 using FluentValidation;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using Serilog;
 
 namespace OnSteroidsApi.WebApi.Configuration
@@ -125,6 +127,24 @@ namespace OnSteroidsApi.WebApi.Configuration
                     .ReadFrom.Configuration(context.Configuration)
                     .Enrich.FromLogContext()
                     .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}");
+            });
+        }
+        public static void AddProjectRateLimiter(this WebApplicationBuilder builder)
+        {
+            builder.Services.AddRateLimiter(options =>
+            {
+                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+                    RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                        factory: _ => new FixedWindowRateLimiterOptions
+                        {
+                            AutoReplenishment = true,
+                            PermitLimit = 100,
+                            QueueLimit = 2,
+                            Window = TimeSpan.FromMinutes(1)
+                        }));
+
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             });
         }
     }
