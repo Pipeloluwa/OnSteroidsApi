@@ -99,11 +99,15 @@ namespace OnSteroidsApi.WebApi.Configuration
             services.AddScoped<IProxyService, ProxyService>();
 
             // Infrastructure repositories — HttpClient with SSL bypass for the proxy
-            services.AddHttpClient<IProxyRepository, ProxyRepository>()
+            services.AddScoped<IProxyRepository, ProxyRepository>();
+
+            services.AddHttpClient("ProxyClient_Bypass")
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
                 });
+
+            services.AddHttpClient("ProxyClient_Strict");
         }
 
 
@@ -149,3 +153,4 @@ namespace OnSteroidsApi.WebApi.Configuration
         }
     }
 }
+

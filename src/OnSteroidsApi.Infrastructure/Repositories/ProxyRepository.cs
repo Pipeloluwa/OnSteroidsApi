@@ -9,12 +9,12 @@ using Microsoft.Extensions.Logging;
 namespace OnSteroidsApi.Infrastructure.Repositories;
 
 public class ProxyRepository(
-        HttpClient httpClient,
+        IHttpClientFactory httpClientFactory,
         IHttpContextAccessor httpContextAccessor,
         ILogger<ProxyRepository> logger
     ) : IProxyRepository
 {
-    private readonly HttpClient _httpClient = httpClient;
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
     private readonly ILogger<ProxyRepository> _logger = logger;
 
@@ -30,7 +30,35 @@ public class ProxyRepository(
 
         var requiresOrAllowsBody = method is "POST" or "PUT" or "PATCH" or "DELETE";
 
-        if (!string.IsNullOrEmpty(proxyRequest.Body))
+        if (proxyRequest.Files != null && proxyRequest.Files.Count > 0 || proxyRequest.FormFields != null && proxyRequest.FormFields.Count > 0)
+        {
+            var multipartContent = new MultipartFormDataContent();
+            if (proxyRequest.FormFields != null)
+            {
+                foreach (var field in proxyRequest.FormFields)
+                {
+                    multipartContent.Add(new StringContent(field.Value), field.Key);
+                }
+            }
+            if (proxyRequest.Files != null)
+            {
+                foreach (var file in proxyRequest.Files)
+                {
+                    var streamContent = new StreamContent(file.Stream);
+                    if (!string.IsNullOrEmpty(file.ContentType))
+                    {
+                        streamContent.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(file.ContentType);
+                    }
+                    multipartContent.Add(streamContent, file.Name, file.FileName);
+                }
+            }
+            requestMessage.Content = multipartContent;
+            
+            // Remove Content-Type from headers so it doesn't overwrite multipart boundary
+            proxyRequest.Headers.Remove("Content-Type");
+            proxyRequest.Headers.Remove("content-type");
+        }
+        else if (!string.IsNullOrEmpty(proxyRequest.Body))
         {
             var contentType = proxyRequest.Headers.TryGetValue("Content-Type", out var ct) && !string.IsNullOrWhiteSpace(ct)
                 ? ct
@@ -80,7 +108,9 @@ public class ProxyRepository(
 
         // Measure ONLY the target API response time — start stopwatch just before SendAsync
         var stopwatch = Stopwatch.StartNew();
-        var response = await _httpClient.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var clientName = proxyRequest.VerifySsl ? "ProxyClient_Strict" : "ProxyClient_Bypass";
+        var client = _httpClientFactory.CreateClient(clientName);
+        var response = await client.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         stopwatch.Stop();
 
         var responseTimeMs = stopwatch.ElapsedMilliseconds;
@@ -111,3 +141,4 @@ public class ProxyRepository(
         return proxyResponse;
     }
 }
+
