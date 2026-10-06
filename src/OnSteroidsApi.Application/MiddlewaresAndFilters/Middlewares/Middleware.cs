@@ -28,7 +28,26 @@ namespace OnSteroidsApi.Application.MiddlewaresAndFilters.Middlewares
             using (_logger.BeginScope(new Dictionary<string, object> { ["RequestId"] = requestId }))
             {
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                _logger.LogInformation("[{RequestId}] Incoming HTTP {Method} {Path}", requestId, context.Request.Method, context.Request.Path);
+
+                var requestHeaders = JsonSerializer.Serialize(context.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString()));
+                
+                context.Request.EnableBuffering();
+                var requestBodyText = string.Empty;
+                if (context.Request.ContentLength > 0 || context.Request.Headers.ContainsKey("Transfer-Encoding"))
+                {
+                    using (var reader = new StreamReader(context.Request.Body, System.Text.Encoding.UTF8, leaveOpen: true))
+                    {
+                        requestBodyText = await reader.ReadToEndAsync();
+                        context.Request.Body.Position = 0;
+                    }
+                }
+                
+                _logger.LogInformation("Incoming HTTP {Method} {Path} \nHeaders: {Headers} \nBody: {Body}", 
+                    context.Request.Method, context.Request.Path, requestHeaders, requestBodyText);
+
+                var originalResponseBodyStream = context.Response.Body;
+                using var responseBodyMemoryStream = new MemoryStream();
+                context.Response.Body = responseBodyMemoryStream;
 
                 try
                 {
@@ -44,10 +63,23 @@ namespace OnSteroidsApi.Application.MiddlewaresAndFilters.Middlewares
                 }
                 finally
                 {
+                    context.Response.Body.Position = 0;
+                    var responseBodyText = string.Empty;
+                    using (var reader = new StreamReader(context.Response.Body, System.Text.Encoding.UTF8, leaveOpen: true))
+                    {
+                        responseBodyText = await reader.ReadToEndAsync();
+                        context.Response.Body.Position = 0;
+                    }
+
+                    _logger.LogInformation("Outgoing Response Body: {Body}", responseBodyText);
+                    
+                    await responseBodyMemoryStream.CopyToAsync(originalResponseBodyStream);
+                    context.Response.Body = originalResponseBodyStream;
+
                     stopwatch.Stop();
                     _logger.LogInformation(
-                        "[{RequestId}] Completed HTTP {Method} {Path} with status {StatusCode} in {ElapsedMilliseconds}ms",
-                        requestId, context.Request.Method, context.Request.Path, context.Response.StatusCode, stopwatch.ElapsedMilliseconds
+                        "Completed HTTP {Method} {Path} with status {StatusCode} in {ElapsedMilliseconds}ms",
+                        context.Request.Method, context.Request.Path, context.Response.StatusCode, stopwatch.ElapsedMilliseconds
                     );
                 }
             }
@@ -58,7 +90,7 @@ namespace OnSteroidsApi.Application.MiddlewaresAndFilters.Middlewares
         {
             if (!context.Response.HasStarted)
             {
-                _logger.LogError(ex, "[{RequestId}] Proxy request failed: {Message}", requestId, ex.Message);
+                _logger.LogError(ex, "Proxy request failed: {Message}", ex.Message);
 
                 (int statusCode, object error) = BaseResponseHelpers.ReturnValidationSemanticErrorData(ex.Message, null);
                 context.Response.StatusCode = statusCode;
@@ -71,7 +103,7 @@ namespace OnSteroidsApi.Application.MiddlewaresAndFilters.Middlewares
         {
             if (!context.Response.HasStarted)
             {
-                _logger.LogError(ex, "[{RequestId}] Something went wrong while handling {Path}", requestId, context.Request.Path);
+                _logger.LogError(ex, "Something went wrong while handling {Path}", context.Request.Path);
 
                 (int statusCode, object error) = BaseResponseHelpers.ReturnServerErrorData("Something went wrong", null);
                 context.Response.StatusCode = statusCode;
