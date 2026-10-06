@@ -63,17 +63,28 @@ namespace OnSteroidsApi.Application.MiddlewaresAndFilters.Middlewares
                 }
                 finally
                 {
-                    context.Response.Body.Position = 0;
                     var responseBodyText = string.Empty;
-                    using (var reader = new StreamReader(context.Response.Body, System.Text.Encoding.UTF8, leaveOpen: true))
+                    if (responseBodyMemoryStream.CanRead)
                     {
-                        responseBodyText = await reader.ReadToEndAsync();
-                        context.Response.Body.Position = 0;
+                        responseBodyMemoryStream.Position = 0;
+                        using (var reader = new StreamReader(responseBodyMemoryStream, System.Text.Encoding.UTF8, leaveOpen: true))
+                        {
+                            responseBodyText = await reader.ReadToEndAsync();
+                        }
+                        responseBodyMemoryStream.Position = 0;
+                        _logger.LogInformation("Outgoing Response Body: {Body}", responseBodyText);
+                        
+                        await responseBodyMemoryStream.CopyToAsync(originalResponseBodyStream);
+                    }
+                    else
+                    {
+                        var bytes = responseBodyMemoryStream.ToArray();
+                        responseBodyText = System.Text.Encoding.UTF8.GetString(bytes);
+                        _logger.LogInformation("Outgoing Response Body: {Body}", responseBodyText);
+                        
+                        await originalResponseBodyStream.WriteAsync(bytes, 0, bytes.Length);
                     }
 
-                    _logger.LogInformation("Outgoing Response Body: {Body}", responseBodyText);
-                    
-                    await responseBodyMemoryStream.CopyToAsync(originalResponseBodyStream);
                     context.Response.Body = originalResponseBodyStream;
 
                     stopwatch.Stop();
