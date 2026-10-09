@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 using Serilog;
+using OnSteroidsApi.Domain.Models.AppSettingsModels;
+using OnSteroidsApi.Domain.Models.Common.BaseModels.Responses;
 
 namespace OnSteroidsApi.WebApi.Configuration
 {
@@ -135,6 +137,16 @@ namespace OnSteroidsApi.WebApi.Configuration
         }
         public static void AddProjectRateLimiter(this WebApplicationBuilder builder)
         {
+            var globalRateLimit = builder.Configuration
+                .GetSection("AppSettings:GlobalRateLimiter")
+                .Get<RateLimitPolicySettings>() ?? new RateLimitPolicySettings
+                {
+                    PermitLimit = 300,
+                    WindowMinutes = 1,
+                    QueueLimit = 2,
+                    ErrorMessage = "Too many requests. Please try again after {retryAfterMinutes} minute(s)."
+                };
+
             builder.Services.AddRateLimiter(options =>
             {
                 options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
@@ -143,12 +155,36 @@ namespace OnSteroidsApi.WebApi.Configuration
                         factory: _ => new FixedWindowRateLimiterOptions
                         {
                             AutoReplenishment = true,
-                            PermitLimit = 100,
-                            QueueLimit = 2,
-                            Window = TimeSpan.FromMinutes(1)
+                            PermitLimit = Math.Max(1, globalRateLimit.PermitLimit),
+                            QueueLimit = Math.Max(0, globalRateLimit.QueueLimit),
+                            Window = TimeSpan.FromMinutes(Math.Max(1, globalRateLimit.WindowMinutes))
                         }));
 
                 options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+                options.OnRejected = async (context, cancellationToken) =>
+                {
+                    var http = context.HttpContext;
+
+                    // Work out how long until the client may retry
+                    TimeSpan retryAfter = TimeSpan.FromMinutes(globalRateLimit.WindowMinutes);
+                    if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var leaseRetryAfter))
+                    {
+                        retryAfter = leaseRetryAfter;
+                    }
+                    var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
+                    var retryAfterMinutes = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalMinutes));
+
+                    var template = globalRateLimit.ErrorMessage
+                        ?? "Too many requests. Please try again after {retryAfterMinutes} minute(s).";
+                    var message = template.Replace("{retryAfterMinutes}", retryAfterMinutes.ToString());
+
+                    http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    http.Response.Headers.RetryAfter = retryAfterSeconds.ToString();
+                    await http.Response.WriteAsJsonAsync(
+                        new BaseErrorResponse("Too Many Requests", "429", message, [message]),
+                        cancellationToken);
+                };
             });
         }
     }
