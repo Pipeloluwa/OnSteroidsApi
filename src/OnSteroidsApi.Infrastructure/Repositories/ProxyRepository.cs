@@ -26,7 +26,11 @@ public class ProxyRepository(
             ?? "N/A";
 
         var method = proxyRequest.Method?.Trim().ToUpperInvariant() ?? "GET";
-        var requestMessage = new HttpRequestMessage(new HttpMethod(method), proxyRequest.Url);
+        var requestMessage = new HttpRequestMessage(new HttpMethod(method), proxyRequest.Url)
+        {
+            Version = System.Net.HttpVersion.Version11,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
+        };
 
         var requiresOrAllowsBody = method is "POST" or "PUT" or "PATCH" or "DELETE";
 
@@ -37,7 +41,8 @@ public class ProxyRepository(
             {
                 foreach (var field in proxyRequest.FormFields)
                 {
-                    multipartContent.Add(new StringContent(field.Value), field.Key);
+                    var cleanFieldVal = field.Value?.Trim().Replace("\r", "").Replace("\n", "") ?? "";
+                    multipartContent.Add(new StringContent(cleanFieldVal), field.Key);
                 }
             }
             if (proxyRequest.Files != null)
@@ -47,7 +52,15 @@ public class ProxyRepository(
                     var streamContent = new StreamContent(file.Stream);
                     if (!string.IsNullOrEmpty(file.ContentType))
                     {
-                        streamContent.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(file.ContentType);
+                        var cleanFileCt = file.ContentType.Trim().Replace("\r", "").Replace("\n", "");
+                        try
+                        {
+                            streamContent.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(cleanFileCt);
+                        }
+                        catch
+                        {
+                            streamContent.Headers.TryAddWithoutValidation("Content-Type", cleanFileCt);
+                        }
                     }
                     multipartContent.Add(streamContent, file.Name, file.FileName);
                 }
@@ -60,8 +73,10 @@ public class ProxyRepository(
         }
         else if (!string.IsNullOrEmpty(proxyRequest.Body))
         {
-            var contentType = proxyRequest.Headers.TryGetValue("Content-Type", out var ct) && !string.IsNullOrWhiteSpace(ct)
-                ? ct
+            var rawContentType = proxyRequest.Headers
+                .FirstOrDefault(h => h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)).Value;
+            var contentType = !string.IsNullOrWhiteSpace(rawContentType)
+                ? rawContentType.Trim().Replace("\r", "").Replace("\n", "")
                 : "application/json";
 
             var stringContent = new StringContent(proxyRequest.Body, Encoding.UTF8);
@@ -80,28 +95,47 @@ public class ProxyRepository(
             // Send an empty content payload with Content-Length: 0 for POST, PUT, PATCH, DELETE to eliminate the HTTP 411 Length Required error on servers requiring chunked or content length.
             var emptyContent = new ByteArrayContent(Array.Empty<byte>());
             emptyContent.Headers.ContentLength = 0;
-            if (proxyRequest.Headers.TryGetValue("Content-Type", out var ct) && !string.IsNullOrWhiteSpace(ct))
+            var rawContentType = proxyRequest.Headers
+                .FirstOrDefault(h => h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)).Value;
+            if (!string.IsNullOrWhiteSpace(rawContentType))
             {
-                emptyContent.Headers.TryAddWithoutValidation("Content-Type", ct);
+                var cleanCt = rawContentType.Trim().Replace("\r", "").Replace("\n", "");
+                try
+                {
+                    emptyContent.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(cleanCt);
+                }
+                catch
+                {
+                    emptyContent.Headers.TryAddWithoutValidation("Content-Type", cleanCt);
+                }
             }
             requestMessage.Content = emptyContent;
         }
 
         foreach (var header in proxyRequest.Headers)
         {
-            if (header.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)) continue;
-            if (header.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)) continue;
-            if (header.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.IsNullOrWhiteSpace(header.Key)) continue;
 
-            if (!requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value))
+            var cleanKey = header.Key.Trim().Replace("\r", "").Replace("\n", "");
+            if (string.IsNullOrWhiteSpace(cleanKey)) continue;
+
+            var cleanValue = header.Value != null ? header.Value.Trim().Replace("\r", "").Replace("\n", "") : "";
+
+            if (cleanKey.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)) continue;
+            if (cleanKey.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)) continue;
+            if (cleanKey.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
+            if (cleanKey.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (!requestMessage.Headers.TryAddWithoutValidation(cleanKey, cleanValue))
             {
-                requestMessage.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                requestMessage.Content?.Headers.TryAddWithoutValidation(cleanKey, cleanValue);
             }
         }
 
         if (!requestMessage.Headers.Contains("X-Request-ID") && requestId != "N/A")
         {
-            requestMessage.Headers.TryAddWithoutValidation("X-Request-ID", requestId);
+            var cleanRequestId = requestId.Trim().Replace("\r", "").Replace("\n", "");
+            requestMessage.Headers.TryAddWithoutValidation("X-Request-ID", cleanRequestId);
         }
 
         _logger.LogInformation("[{RequestId}] Sending {Method} request to {Url}", requestId, proxyRequest.Method, proxyRequest.Url);
