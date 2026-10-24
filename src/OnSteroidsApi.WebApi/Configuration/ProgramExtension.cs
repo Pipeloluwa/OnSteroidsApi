@@ -134,19 +134,92 @@ namespace OnSteroidsApi.WebApi.Configuration
         {
             builder.Host.UseSerilog((context, configuration) =>
             {
+                var logSettings = context.Configuration.GetSection("AppSettings:LogSettings").Get<LogSettings>()
+                    ?? context.Configuration.GetSection("LogSettings").Get<LogSettings>()
+                    ?? new LogSettings();
+
                 var baseDir = !string.IsNullOrWhiteSpace(context.HostingEnvironment.ContentRootPath)
                     ? context.HostingEnvironment.ContentRootPath
                     : AppDomain.CurrentDomain.BaseDirectory;
-                var logDirectory = context.Configuration["AppSettings:LogDirectory"] ?? Path.Combine(baseDir, "Logs");
-                var jsonLogPath = Path.Combine(logDirectory, "Structured", "log-.json");
-                var textLogPath = Path.Combine(logDirectory, "Unstructured", "log-.txt");
+
+                var logDirSetting = !string.IsNullOrWhiteSpace(logSettings.LogDirectory)
+                    ? logSettings.LogDirectory
+                    : context.Configuration["AppSettings:LogDirectory"] ?? "Logs";
+
+                var logDirectory = Path.IsPathRooted(logDirSetting)
+                    ? logDirSetting
+                    : Path.Combine(baseDir, logDirSetting);
 
                 configuration
                     .ReadFrom.Configuration(context.Configuration)
-                    .Enrich.FromLogContext()
-                    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}")
-                    .WriteTo.File(new Serilog.Formatting.Compact.CompactJsonFormatter(), jsonLogPath, rollingInterval: RollingInterval.Day)
-                    .WriteTo.File(textLogPath, rollingInterval: RollingInterval.Day, outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}");
+                    .Enrich.FromLogContext();
+
+                if (!string.IsNullOrWhiteSpace(logSettings.MinimumLevel) &&
+                    Enum.TryParse<Serilog.Events.LogEventLevel>(logSettings.MinimumLevel, true, out var minLevel))
+                {
+                    configuration.MinimumLevel.Is(minLevel);
+                }
+
+                if (logSettings.Console?.Enabled ?? true)
+                {
+                    var template = !string.IsNullOrWhiteSpace(logSettings.Console?.OutputTemplate)
+                        ? logSettings.Console.OutputTemplate
+                        : "[{Timestamp:HH:mm:ss} {Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}";
+
+                    configuration.WriteTo.Console(outputTemplate: template);
+                }
+
+                if (logSettings.Structured?.Enabled ?? true)
+                {
+                    var folder = !string.IsNullOrWhiteSpace(logSettings.Structured?.Folder)
+                        ? logSettings.Structured.Folder
+                        : "Structured";
+                    var fileName = !string.IsNullOrWhiteSpace(logSettings.Structured?.FileName)
+                        ? logSettings.Structured.FileName
+                        : "log-.json";
+                    var jsonLogPath = Path.Combine(logDirectory, folder, fileName);
+
+                    var rollingInterval = Enum.TryParse<RollingInterval>(logSettings.Structured?.RollingInterval, true, out var parsedInterval)
+                        ? parsedInterval
+                        : RollingInterval.Day;
+
+                    configuration.WriteTo.File(
+                        new Serilog.Formatting.Compact.CompactJsonFormatter(),
+                        jsonLogPath,
+                        rollingInterval: rollingInterval,
+                        retainedFileCountLimit: logSettings.Structured?.RetainedFileCountLimit ?? 31,
+                        fileSizeLimitBytes: logSettings.Structured?.FileSizeLimitBytes ?? (100 * 1024 * 1024),
+                        rollOnFileSizeLimit: logSettings.Structured?.RollOnFileSizeLimit ?? true
+                    );
+                }
+
+                if (logSettings.Unstructured?.Enabled ?? true)
+                {
+                    var folder = !string.IsNullOrWhiteSpace(logSettings.Unstructured?.Folder)
+                        ? logSettings.Unstructured.Folder
+                        : "Unstructured";
+                    var fileName = !string.IsNullOrWhiteSpace(logSettings.Unstructured?.FileName)
+                        ? logSettings.Unstructured.FileName
+                        : "log-.txt";
+                    var textLogPath = Path.Combine(logDirectory, folder, fileName);
+
+                    var rollingInterval = Enum.TryParse<RollingInterval>(logSettings.Unstructured?.RollingInterval, true, out var parsedInterval)
+                        ? parsedInterval
+                        : RollingInterval.Day;
+
+                    var template = !string.IsNullOrWhiteSpace(logSettings.Unstructured?.OutputTemplate)
+                        ? logSettings.Unstructured.OutputTemplate
+                        : "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}";
+
+                    configuration.WriteTo.File(
+                        textLogPath,
+                        rollingInterval: rollingInterval,
+                        retainedFileCountLimit: logSettings.Unstructured?.RetainedFileCountLimit ?? 31,
+                        fileSizeLimitBytes: logSettings.Unstructured?.FileSizeLimitBytes ?? (100 * 1024 * 1024),
+                        rollOnFileSizeLimit: logSettings.Unstructured?.RollOnFileSizeLimit ?? true,
+                        outputTemplate: template
+                    );
+                }
             });
         }
 

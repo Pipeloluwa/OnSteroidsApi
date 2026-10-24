@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using OnSteroidsApi.Application.Abstractions.Interfaces.IDapper;
+using OnSteroidsApi.Domain.Models.AppSettingsModels;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -12,15 +14,24 @@ namespace OnSteroidsApi.Application.MiddlewaresAndFilters.Middlewares;
 public class RequestResponseLoggingMiddleware(
     RequestDelegate next,
     ILogger<RequestResponseLoggingMiddleware> logger,
-    IServiceScopeFactory scopeFactory
+    IServiceScopeFactory scopeFactory,
+    IOptions<AppSettings>? appSettings = null
 )
 {
     private readonly RequestDelegate _next = next;
     private readonly ILogger<RequestResponseLoggingMiddleware> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
+    private readonly AppSettings? _appSettings = appSettings?.Value;
 
     public async Task InvokeAsync(HttpContext context)
     {
+        var dbLoggingEnabled = _appSettings?.LogSettings?.Database?.Enabled ?? true;
+        if (!dbLoggingEnabled)
+        {
+            await _next(context);
+            return;
+        }
+
         var requestBody = await GetRequestBodyAsync(context.Request);
         var method = context.Request.Method;
         var path = (context.Request.Path.Value ?? string.Empty) + (context.Request.QueryString.Value ?? string.Empty);
@@ -46,7 +57,11 @@ public class RequestResponseLoggingMiddleware(
                 using var scope = _scopeFactory.CreateScope();
                 var dapperConnection = scope.ServiceProvider.GetRequiredService<IDapperConnection>();
 
-                var sql = "spApiLogs_Insert";
+                var sql = _appSettings?.LogSettings?.Database?.StoredProcedure;
+                if (string.IsNullOrWhiteSpace(sql))
+                {
+                    sql = "spApiLogs_Insert";
+                }
 
                 var parameters = new Dapper.DynamicParameters();
                 parameters.Add("TraceId", traceId);
