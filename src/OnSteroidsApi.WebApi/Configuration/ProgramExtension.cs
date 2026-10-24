@@ -134,9 +134,12 @@ namespace OnSteroidsApi.WebApi.Configuration
         {
             builder.Host.UseSerilog((context, configuration) =>
             {
-                var logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+                var baseDir = !string.IsNullOrWhiteSpace(context.HostingEnvironment.ContentRootPath)
+                    ? context.HostingEnvironment.ContentRootPath
+                    : AppDomain.CurrentDomain.BaseDirectory;
+                var logDirectory = context.Configuration["AppSettings:LogDirectory"] ?? Path.Combine(baseDir, "Logs");
                 var jsonLogPath = Path.Combine(logDirectory, "Structured", "log-.json");
-                var textLogPath = Path.Combine(logDirectory, "Text", "log-.txt");
+                var textLogPath = Path.Combine(logDirectory, "Unstructured", "log-.txt");
 
                 configuration
                     .ReadFrom.Configuration(context.Configuration)
