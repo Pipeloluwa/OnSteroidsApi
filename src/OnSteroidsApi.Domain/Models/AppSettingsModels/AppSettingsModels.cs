@@ -4,7 +4,13 @@ public class AppSettings
 {
     public string? AllowedHosts { get; set; }
     public string? AllowedOrigins { get; set; }
+    public SqlSettings? SqlSettings { get; set; } = new();
     public RateLimitPolicySettings? GlobalRateLimiter { get; set; } = new();
+}
+
+public class SqlSettings
+{
+    public string? ConnectionString { get; set; }
 }
 
 public class RateLimitPolicySettings

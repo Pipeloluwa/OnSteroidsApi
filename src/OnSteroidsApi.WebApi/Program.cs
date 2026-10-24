@@ -7,6 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 // ── Configuration ──────────────────────────────────────────────
 builder.AddKestrelConfig();
 builder.AddSerilogConfig();
+builder.Services.AddAppConfigurationOptions(builder.Configuration);
 builder.AddControllerConfig();
 builder.AddSwaggerConfig();
 builder.AddProjectCors();

@@ -10,6 +10,7 @@ namespace OnSteroidsApi.WebApi.Configuration
         public static void UseMiddlewareExtensions(this WebApplication app)
         {
             app.UseMiddleware<Middleware>();
+            app.UseMiddleware<RequestResponseLoggingMiddleware>();
         }
     }
 }

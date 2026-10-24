@@ -1,7 +1,9 @@
+using OnSteroidsApi.Application.Abstractions.Interfaces.IDapper;
 using OnSteroidsApi.Application.Abstractions.Interfaces.IRepositories;
 using OnSteroidsApi.Application.Abstractions.Interfaces.IServices;
 using OnSteroidsApi.Application.Features.Helpers;
 using OnSteroidsApi.Application.Services;
+using OnSteroidsApi.Infrastructure.Dapper;
 using OnSteroidsApi.Domain.Constants.Enums;
 using OnSteroidsApi.Infrastructure.Repositories;
 using FluentValidation;
@@ -97,6 +99,9 @@ namespace OnSteroidsApi.WebApi.Configuration
         {
             services.AddHttpContextAccessor();
 
+            // Infrastructure — Dapper connection for database operations (e.g. request/response logging)
+            services.AddSingleton<IDapperConnection, DapperConnection>();
+
             // Application services
             services.AddScoped<IProxyService, ProxyService>();
 
@@ -123,17 +128,28 @@ namespace OnSteroidsApi.WebApi.Configuration
 
 
         /// <summary>
-        /// Configures Serilog as the logging provider.
+        /// Configures Serilog as the logging provider with structured JSON, formatted text, and console sinks.
         /// </summary>
         public static void AddSerilogConfig(this WebApplicationBuilder builder)
         {
             builder.Host.UseSerilog((context, configuration) =>
             {
+                var logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+                var jsonLogPath = Path.Combine(logDirectory, "Structured", "log-.json");
+                var textLogPath = Path.Combine(logDirectory, "Text", "log-.txt");
+
                 configuration
                     .ReadFrom.Configuration(context.Configuration)
                     .Enrich.FromLogContext()
-                    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}");
+                    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}")
+                    .WriteTo.File(new Serilog.Formatting.Compact.CompactJsonFormatter(), jsonLogPath, rollingInterval: RollingInterval.Day)
+                    .WriteTo.File(textLogPath, rollingInterval: RollingInterval.Day, outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{RequestId}] {Message:lj}{NewLine}{Exception}");
             });
+        }
+
+        public static void AddAppConfigurationOptions(this IServiceCollection services, IConfiguration configuration)
+        {
+            services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
         }
         public static void AddProjectRateLimiter(this WebApplicationBuilder builder)
         {

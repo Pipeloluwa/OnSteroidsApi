@@ -8,6 +8,7 @@
     <ProjectReference Include="..\OnSteroidsApi.Domain\OnSteroidsApi.Domain.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.66" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.*" />
   </ItemGroup>
   <ItemGroup>
